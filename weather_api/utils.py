@@ -127,7 +127,9 @@ def format_forecast(data: dict) -> str:
     lines = [f"📅 Прогноз на 5 дней — {city}:"]
     for day, slot in days.items():
         date_info = datetime.date.fromisoformat(day).strftime("%d.%m")
-        typical = max(set(slot["descriptions"]), key=slot["descriptions"].count)
+        typical = max(
+            set(slot["descriptions"]), key=slot["descriptions"].count
+        )
         rain = round(slot["pop_max"] * 100)
         lines.append(
             f"• {date_info}; {temperature_str(slot['min'])}…"

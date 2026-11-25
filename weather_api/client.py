@@ -66,7 +66,8 @@ class OpenWeatherAPI:
         self.api_key = api_key or config.OPENWEATHER_API_KEY
         if not self.api_key:
             raise OpenWeatherAPIError(
-                "Ключ OpenWeather не задан: заполните OPENWEATHER_API_KEY в .env"
+                "Ключ OpenWeather не задан: "
+                "заполните OPENWEATHER_API_KEY в .env"
             )
         self.session = requests.Session()
 
@@ -124,7 +125,9 @@ class OpenWeatherAPI:
             {"q": city, "limit": 1},
         )
         if not body:
-            raise CityNotFoundError(f"Город «{city}» не найден, проверьте название")
+            raise CityNotFoundError(
+                f"Город «{city}» не найден, проверьте название"
+            )
         return body[0]
 
     def _reverse_geocode(self, lat: float, lon: float) -> dict:
@@ -167,7 +170,9 @@ class OpenWeatherAPI:
             if code not in components:
                 continue
             value = components[code]
-            upper_good, upper_fair, upper_moderate, upper_poor = AIR_SCALE[code]
+            upper_good, upper_fair, upper_moderate, upper_poor = (
+                AIR_SCALE[code]
+            )
             if value < upper_good:
                 scores = 0
             elif value < upper_fair:
