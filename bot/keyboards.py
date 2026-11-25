@@ -1,5 +1,7 @@
 """Клавиатуры бота: главная менюшка с кнопками урока."""
 
+import json
+
 from vkbottle import Keyboard, KeyboardButtonColor, Text
 
 #: Кнопки главного меню: подпись -> (цвет)
@@ -13,6 +15,21 @@ MENU_BUTTONS = [
     ("ℹ️ Помощь", "secondary"),
 ]
 
+# payload кнопок — VK-канонический формат
+# (VK-доки: payload обязателен для text-кнопок)
+MENU_PAYLOADS = tuple(
+    json.dumps({"cmd": name})
+    for name in (
+        "weather_now",
+        "forecast5",
+        "compare",
+        "extended",
+        "geo",
+        "my_city",
+        "help",
+    )
+)
+
 #: Кнопка-псевдоним «назад в меню» (та же клавиатура возвращается ответом)
 MENU_TITLE = "Главное меню погодного бота"
 
@@ -20,15 +37,18 @@ MENU_TITLE = "Главное меню погодного бота"
 def build_main_keyboard() -> str:
     """Собрать главную клавиатуру: 2 кнопки в ряд, JSON для VK."""
     keyboard = Keyboard(one_time=False, inline=False)
+    colors = {
+        "primary": KeyboardButtonColor.PRIMARY,
+        "positive": KeyboardButtonColor.POSITIVE,
+        "secondary": KeyboardButtonColor.SECONDARY,
+    }
     for index, (label, color) in enumerate(MENU_BUTTONS):
-        button = Text(label)
-        if color == "primary":
-            button = button.color(KeyboardButtonColor.PRIMARY)
-        elif color == "positive":
-            button = button.color(KeyboardButtonColor.POSITIVE)
-        else:
-            button = button.color(KeyboardButtonColor.SECONDARY)
-        keyboard.add(button)
+        # vkbottle 4.11: цвет кнопки — аргумент add(), метод .color()
+        # у кнопок удалён; payload — VK-канонический формат, без него
+        # клиенты могут терять клавиатуру
+        keyboard.add(
+            Text(label, payload=MENU_PAYLOADS[index]), color=colors[color]
+        )
         if index % 2 == 1 and index < len(MENU_BUTTONS) - 1:
             keyboard.row()
     return keyboard.get_json()

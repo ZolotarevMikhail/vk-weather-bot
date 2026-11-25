@@ -5,9 +5,11 @@
 """
 
 import logging
+import re
 
-from vkbottle import GeoRule
 from vkbottle.bot import Bot, Message
+# GeoRule/RegexRule не экспортируются на верхнем уровне vkbottle
+from vkbottle.dispatch.rules.base import GeoRule, RegexRule
 
 from weather_api import utils
 from weather_api.client import OpenWeatherAPI
@@ -26,6 +28,11 @@ last_city_by_peer: dict[int, str] = {}
 
 #: подписи кнопок меню — чтобы state-обработчики их пропускали
 MENU_LABELS = {label for label, _color in MENU_BUTTONS}
+
+#: координаты текстом: «55.7558, 37.6173» — дробь с точкой или запятой
+COORD_PATTERN = re.compile(
+    r"^\s*(-?\d{1,2}(?:[.,]\d+)?)\s*,\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$"
+)
 
 
 def remember_city(peer_id: int, city: str) -> None:
@@ -62,30 +69,60 @@ def extract_geo_coordinates(message: Message):
     return coordinates.latitude, coordinates.longitude
 
 
+async def ask_city_input(
+    bot: Bot, message: Message, state: WeatherStates, prompt: str
+) -> None:
+    """Поставить состояние ожидания города и ответить подсказкой."""
+    await bot.state_dispenser.set(message.peer_id, state)
+    await finish_and_answer(bot, message, prompt)
+
+
+async def send_geo_weather(
+    bot: Bot, message: Message, latitude: float, longitude: float
+) -> None:
+    """Погода по координатам: ответ текстом или ошибка словом."""
+    try:
+        packed = weather_client.get_weather_by_coordinates(latitude, longitude)
+        await finish_and_answer(
+            bot, message, utils.format_basic_weather(packed["weather"])
+        )
+    except OpenWeatherAPIError as error:
+        await finish_and_answer(bot, message, f"Ошибка: {error}")
+
+
 def register_handlers(bot: Bot) -> None:
-    """Зарегистрировать все обработчики: порядок важен — меню выше состояний."""
+    """Зарегистрировать все обработчики.
+
+    Порядок важен: обработчики меню выше обработчиков состояний.
+    """
 
     @bot.on.message(text="🌤 Погода сейчас")
     async def ask_weather_city(message: Message):
-        await finish_and_answer(bot, message, "Введите город:")
+        await ask_city_input(
+            bot, message, WeatherStates.WAITING_WEATHER_CITY, "Введите город:"
+        )
 
     @bot.on.message(text="📅 Прогноз 5 дней")
     async def ask_forecast_city(message: Message):
-        await finish_and_answer(bot, message, "Введите город:")
+        await ask_city_input(
+            bot, message, WeatherStates.WAITING_FORECAST_CITY, "Введите город:"
+        )
 
     @bot.on.message(text="🌫 Расширенный режим")
     async def ask_extended_city(message: Message):
-        await finish_and_answer(
+        await ask_city_input(
             bot,
             message,
+            WeatherStates.WAITING_EXTENDED_CITY,
             "Введите город: пришлю давление, видимость и качество воздуха.",
         )
 
     @bot.on.message(text="⚖️ Сравнение городов")
     async def ask_compare_cities(message: Message):
-        await finish_and_answer(
+        await ask_city_input(
             bot,
             message,
+            WeatherStates.WAITING_COMPARE_CITIES,
             "Введите два города через запятую, например: Москва, Сочи",
         )
 
@@ -130,15 +167,14 @@ def register_handlers(bot: Bot) -> None:
             )
             return
         latitude, longitude = coordinates
-        try:
-            packed = weather_client.get_weather_by_coordinates(
-                latitude, longitude
-            )
-            await finish_and_answer(
-                bot, message, utils.format_basic_weather(packed["weather"])
-            )
-        except OpenWeatherAPIError as error:
-            await finish_and_answer(bot, message, f"Ошибка: {error}")
+        await send_geo_weather(bot, message, latitude, longitude)
+
+    @bot.on.message(RegexRule(COORD_PATTERN))
+    async def weather_by_geo_text(message: Message, match: tuple):
+        """Координаты текстом: «55.7558, 37.6173»."""
+        latitude = float(match[0].replace(",", "."))
+        longitude = float(match[1].replace(",", "."))
+        await send_geo_weather(bot, message, latitude, longitude)
 
     @bot.on.message(state=WeatherStates.WAITING_WEATHER_CITY)
     async def city_weather(message: Message):
@@ -149,7 +185,8 @@ def register_handlers(bot: Bot) -> None:
             await finish_and_answer(bot, message, text)
         except OpenWeatherAPIError as error:
             await message.answer(
-                f"Ошибка: {error}. Введите город ещё раз:"
+                f"Ошибка: {error}. Введите город ещё раз:",
+                keyboard=MAIN_KEYBOARD,
             )
 
     @bot.on.message(state=WeatherStates.WAITING_FORECAST_CITY)
@@ -161,10 +198,12 @@ def register_handlers(bot: Bot) -> None:
                 message.text.strip()
             )
             remember_city(message.peer_id, message.text.strip())
-            await finish_and_answer(bot, message, utils.format_forecast(forecast))
+            forecast = utils.format_forecast(forecast)
+            await finish_and_answer(bot, message, forecast)
         except OpenWeatherAPIError as error:
             await message.answer(
-                f"Ошибка: {error}. Введите город ещё раз:"
+                f"Ошибка: {error}. Введите город ещё раз:",
+                keyboard=MAIN_KEYBOARD,
             )
 
     @bot.on.message(state=WeatherStates.WAITING_EXTENDED_CITY)
@@ -176,7 +215,8 @@ def register_handlers(bot: Bot) -> None:
             await finish_and_answer(bot, message, text)
         except OpenWeatherAPIError as error:
             await message.answer(
-                f"Ошибка: {error}. Введите город ещё раз:"
+                f"Ошибка: {error}. Введите город ещё раз:",
+                keyboard=MAIN_KEYBOARD,
             )
 
     @bot.on.message(state=WeatherStates.WAITING_COMPARE_CITIES)
@@ -200,7 +240,8 @@ def register_handlers(bot: Bot) -> None:
             await finish_and_answer(bot, message, text)
         except OpenWeatherAPIError as error:
             await message.answer(
-                f"Ошибка: {error}. Повторите запрос: Москва, Сочи"
+                f"Ошибка: {error}. Повторите запрос: Москва, Сочи",
+                keyboard=MAIN_KEYBOARD,
             )
 
     @bot.on.message()
